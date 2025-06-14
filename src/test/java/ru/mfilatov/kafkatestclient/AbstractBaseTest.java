@@ -27,9 +27,9 @@ public abstract class AbstractBaseTest {
     var topicRead = getKafkaTopicRead();
     var topicWrite = getKafkaTopicWrite();
 
-    KafkaClientProducer producer = Objects.nonNull(topicWrite) ? null : createProducer(topicWrite);
+    KafkaClientProducer producer = Objects.isNull(topicWrite) ? null : createProducer(topicWrite);
     KafkaMessageSubscriber subscriber =
-        Objects.nonNull(topicRead) ? null : createSubscriber(topicRead);
+        Objects.isNull(topicRead) ? null : createSubscriber(topicRead);
 
     kafka = new KafkaSteps(subscriber, producer);
     if (Objects.nonNull(subscriber)) {
@@ -39,6 +39,7 @@ public abstract class AbstractBaseTest {
 
   @AfterAll
   void closeKafka() {
+    kafka.producer.getProducer().close();
     kafka.closeSubscriber();
   }
 
@@ -57,6 +58,6 @@ public abstract class AbstractBaseTest {
   }
 
   protected KafkaClientProducer createProducer(String topic) {
-    return new KafkaClientProducer(new KafkaFileConfigProvider().getKafkaConfig("kafka"), topic);
+    return new KafkaClientProducer(new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"), topic);
   }
 }

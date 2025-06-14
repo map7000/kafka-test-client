@@ -9,6 +9,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -17,6 +18,7 @@ import ru.mfilatov.kafkatestclient.config.KafkaFileConfigProvider;
 import ru.mfilatov.kafkatestclient.consumer.KafkaClientConsumer;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 
+@Slf4j
 public class KafkaMessageConsumer implements Runnable {
   private final List<KafkaMessageSubscription> subscriptions;
   private Set<String> topics = new HashSet<>();
@@ -29,7 +31,7 @@ public class KafkaMessageConsumer implements Runnable {
   @SneakyThrows
   public void run() {
     try (Consumer<String, String> consumer =
-        new KafkaClientConsumer(new KafkaFileConfigProvider().getKafkaConfig("kafka"))
+        new KafkaClientConsumer(new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"))
             .getConsumer()) {
       while (!Thread.currentThread().isInterrupted()) {
         subscriptions.removeIf(KafkaMessageSubscription::isCancelRequested);
@@ -49,7 +51,9 @@ public class KafkaMessageConsumer implements Runnable {
           consumer.subscribe(topics);
         }
 
-        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(500));
+        ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(250));
+
+        log.info("{}",records.count());
 
         for (var record : records) {
           subscriptions.stream()

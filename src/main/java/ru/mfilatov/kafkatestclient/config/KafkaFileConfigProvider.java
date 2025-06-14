@@ -15,7 +15,7 @@ public class KafkaFileConfigProvider {
 
   public Properties getKafkaConfig(String configName) {
     Properties config = new Properties();
-    String defaultConfigPath = rootPath + configName + "properties";
+    String defaultConfigPath = rootPath + configName;
     try {
       config.load(new FileInputStream(defaultConfigPath));
     } catch (IOException e) {
