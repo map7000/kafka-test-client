@@ -58,6 +58,7 @@ public abstract class AbstractBaseTest {
   }
 
   protected KafkaClientProducer createProducer(String topic) {
-    return new KafkaClientProducer(new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"), topic);
+    return new KafkaClientProducer(
+        new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"), topic);
   }
 }

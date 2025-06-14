@@ -53,7 +53,7 @@ public class KafkaMessageConsumer implements Runnable {
 
         ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(250));
 
-        log.info("{}",records.count());
+        log.info("{}", records.count());
 
         for (var record : records) {
           subscriptions.stream()

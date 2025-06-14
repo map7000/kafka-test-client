@@ -67,7 +67,7 @@ public class KafkaClientProducer {
             if (Objects.nonNull(e)) log.error(e.getMessage());
           }));
     }
-//    producer.flush();
+    //    producer.flush();
     return metadata;
   }
 
