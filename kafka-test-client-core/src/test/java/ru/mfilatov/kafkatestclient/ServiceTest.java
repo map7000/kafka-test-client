@@ -21,8 +21,8 @@ import ru.mfilatov.kafkatestclient.annotations.KafkaWriter;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 
 @Slf4j
-@KafkaWriter("test_topic_in_1")
-@KafkaReader("test_topic_out_2")
+@KafkaWriter("test_topic_in")
+@KafkaReader("test_topic_out")
 public class ServiceTest extends AbstractBaseTest {
 
   @ParameterizedTest
