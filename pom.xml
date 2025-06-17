@@ -9,7 +9,7 @@
   <packaging>pom</packaging>
   
   <modules>
-    <module>kafka-test-client-lib</module>
+    <module>kafka-test-client-core</module>
     <module>kafka-test-client-service</module>
   </modules>
 
@@ -31,8 +31,8 @@
         <assertj.version>3.27.3</assertj.version>
         <kafka.version>4.0.0</kafka.version>
         <awaitility.version>4.3.0</awaitility.version>
-        <testcontainers.version>1.21.0</testcontainers.version>
-        <junit-pioneer.version>2.3.0</junit-pioneer.version>
+        <allure.version>2.25.0</allure.version>
+        <aspectj.version>1.9.21</aspectj.version>
 
         <!-- Plugin Versions -->
         <compiler.version>3.14.0</compiler.version>

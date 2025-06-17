@@ -2,7 +2,7 @@
 * Copyright 2025 Mikhail Filatov
 * SPDX-License-Identifier: Apache-2.0
 */
-package org.example;
+package ru.mfilatov.kafkatestclient.service;
 
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;

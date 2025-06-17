@@ -2,7 +2,7 @@
 * Copyright 2025 Mikhail Filatov
 * SPDX-License-Identifier: Apache-2.0
 */
-package org.example;
+package ru.mfilatov.kafkatestclient.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

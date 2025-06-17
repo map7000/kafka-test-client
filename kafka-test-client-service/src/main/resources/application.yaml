@@ -2,9 +2,9 @@ app:
   kafka:
     service:
       producer:
-        topic: test_out
+        topic: test_topic_out
       consumer:
-        topic: test_in
+        topic: test_topic_in
 
 spring:
   application:
