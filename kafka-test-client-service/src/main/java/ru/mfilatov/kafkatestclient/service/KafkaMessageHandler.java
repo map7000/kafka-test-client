@@ -18,9 +18,9 @@ public class KafkaMessageHandler {
     if (roll == 0) {
       kafkaProducerService.send(rqUid, result);
     } else if (roll > 0 && roll <= 7) {
-      serviceScheduler.addToList(result, rqUid, 1);
+      serviceScheduler.scheduleMessage(result, rqUid, 0);
     } else {
-      serviceScheduler.addToList(result, rqUid, 10);
+      serviceScheduler.scheduleMessage(result, rqUid, 10);
     }
   }
 }

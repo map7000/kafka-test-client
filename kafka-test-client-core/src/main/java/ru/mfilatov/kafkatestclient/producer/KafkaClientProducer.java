@@ -17,62 +17,137 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.serialization.Serializer;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 
+/**
+ * A generic Kafka producer that supports different message formats.
+ * Manages producer instances per cluster and handles message serialization.
+ *
+ * @param <K> The type of message keys
+ * @param <V> The type of message values
+ */
 @Slf4j
 @Getter
-public class KafkaClientProducer {
-  private final String clusterName;
-  private final String defaultTopic;
-  private static final Lock lock = new ReentrantLock();
-  private static final ConcurrentMap<String, KafkaProducer<String, String>> producers =
-      new ConcurrentHashMap<>();
+public class KafkaClientProducer<K, V> implements AutoCloseable {
+    private final String clusterName;
+    private final String defaultTopic;
+    private static final Lock lock = new ReentrantLock();
+    private static final ConcurrentMap<String, KafkaProducer<?, ?>> producers = new ConcurrentHashMap<>();
+    
+    private final Serializer<K> keySerializer;
+    private final Serializer<V> valueSerializer;
 
-  public KafkaClientProducer(Properties config, String defaultTopic) {
-    this.clusterName = config.getProperty("kafka.cluster.name");
-    this.defaultTopic = defaultTopic;
+    /**
+     * Creates a new producer with custom serializers.
+     *
+     * @param config Kafka configuration
+     * @param defaultTopic default topic to produce to
+     * @param keySerializer serializer for keys
+     * @param valueSerializer serializer for values
+     */
+    public KafkaClientProducer(
+            Properties config,
+            String defaultTopic,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer) {
+        this.clusterName = config.getProperty("kafka.cluster.name");
+        this.defaultTopic = defaultTopic;
+        this.keySerializer = keySerializer;
+        this.valueSerializer = valueSerializer;
 
-    lock.lock();
-    if (Objects.isNull(producers.get(this.clusterName))) {
-      producers.put(this.clusterName, new KafkaProducer<>(config));
-      log.info("Created producer for cluster: {}", this.clusterName);
+        lock.lock();
+        try {
+            String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
+            if (!producers.containsKey(producerKey)) {
+                producers.put(producerKey, createProducer(config));
+                log.info("Created producer for cluster: {} with types K: {}, V: {}", 
+                    clusterName, 
+                    keySerializer.getClass().getSimpleName(),
+                    valueSerializer.getClass().getSimpleName());
+            }
+        } finally {
+            lock.unlock();
+        }
     }
-    lock.unlock();
-  }
 
-  public KafkaProducer<String, String> getProducer() {
-    return producers.get(this.clusterName);
-  }
-
-  public List<RecordMetadata> send(List<KafkaMessage> messages) {
-    var metadata = new ArrayList<RecordMetadata>();
-    var producer = producers.get(this.clusterName);
-    for (var message : messages) {
-      var headers = new RecordHeaders();
-      message.headers().keySet().stream()
-          .map(a -> new RecordHeader(a, message.headers().get(a).getBytes(StandardCharsets.UTF_8)))
-          .forEach(headers::add);
-
-      ProducerRecord<String, String> record =
-          new ProducerRecord<>(
-              Objects.isNull(message.topic()) ? defaultTopic : message.topic(),
-              message.partition(),
-              message.key(),
-              message.value(),
-              headers);
-
-      producer.send(
-          record,
-          ((recordMetadata, e) -> {
-            if (Objects.nonNull(e)) log.error(e.getMessage());
-          }));
+    @SuppressWarnings("unchecked")
+    private KafkaProducer<K, V> getProducer() {
+        String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
+        return (KafkaProducer<K, V>) producers.get(producerKey);
     }
-    //    producer.flush();
-    return metadata;
-  }
 
-  public RecordMetadata send(KafkaMessage message) {
-    var metadata = send(Collections.singletonList(message));
-    return metadata.isEmpty() ? null : metadata.getFirst();
-  }
+    private KafkaProducer<K, V> createProducer(Properties config) {
+        return new KafkaProducer<>(config, keySerializer, valueSerializer);
+    }
+
+    private String getProducerKey(String clusterName, Serializer<K> keySerializer, Serializer<V> valueSerializer) {
+        return String.format("%s-%s-%s", 
+            clusterName,
+            keySerializer.getClass().getName(),
+            valueSerializer.getClass().getName());
+    }
+
+    /**
+     * Sends multiple messages to Kafka.
+     *
+     * @param messages list of messages to send
+     * @return list of record metadata for sent messages
+     */
+    public List<RecordMetadata> send(List<KafkaMessage<K, V>> messages) {
+        var metadata = new ArrayList<RecordMetadata>();
+        var producer = getProducer();
+
+        for (var message : messages) {
+            var headers = new RecordHeaders();
+            message.headers().entrySet().stream()
+                .map(entry -> new RecordHeader(entry.getKey(), 
+                    entry.getValue().getBytes(StandardCharsets.UTF_8)))
+                .forEach(headers::add);
+
+            ProducerRecord<K, V> record = new ProducerRecord<>(
+                message.topic() != null ? message.topic() : defaultTopic,
+                message.partition(),
+                message.key(),
+                message.value(),
+                headers
+            );
+
+            try {
+                var future = producer.send(record);
+                metadata.add(future.get()); // Wait for send completion
+            } catch (Exception e) {
+                log.error("Failed to send message: {}", e.getMessage(), e);
+            }
+        }
+        
+        producer.flush();
+        return metadata;
+    }
+
+    /**
+     * Sends a single message to Kafka.
+     *
+     * @param message the message to send
+     * @return record metadata for the sent message
+     */
+    public RecordMetadata send(KafkaMessage<K, V> message) {
+        var metadata = send(Collections.singletonList(message));
+        return metadata.isEmpty() ? null : metadata.get(0);
+    }
+
+    @Override
+    public void close() {
+        lock.lock();
+        try {
+            String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
+            KafkaProducer<?, ?> producer = producers.remove(producerKey);
+            if (producer != null) {
+                producer.close();
+                log.info("Closed producer for cluster: {}", clusterName);
+            }
+        } finally {
+            lock.unlock();
+        }
+    }
 }

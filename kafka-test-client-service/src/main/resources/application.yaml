@@ -5,6 +5,15 @@ app:
         topic: test_topic_out
       consumer:
         topic: test_topic_in
+        group-id: your-consumer-group
+        max-poll-records: 500
+        auto-offset-reset: earliest
+        enable-auto-commit: false
+    scheduler:
+      process:
+        interval: 250
+      cleanup:
+        interval: 5000
 
 spring:
   application:
