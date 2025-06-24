@@ -83,9 +83,17 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
       subscription.cancel();
       return;
     }
-    this.subscription = subscription;
-    this.subscription.setTopic(kafkaTopic);
-    log.debug("Subscribed to topic: {}", kafkaTopic);
+    if (subscription instanceof KafkaMessageSubscription) {
+      @SuppressWarnings("unchecked")
+      KafkaMessageSubscription<K, V> kafkaSubscription =
+          (KafkaMessageSubscription<K, V>) subscription;
+      this.subscription = kafkaSubscription;
+      this.subscription.setTopic(kafkaTopic);
+      log.debug("Subscribed to topic: {}", kafkaTopic);
+    } else {
+      log.error("Subscription is not an instance of KafkaMessageSubscription");
+      subscription.cancel();
+    }
   }
 
   /**

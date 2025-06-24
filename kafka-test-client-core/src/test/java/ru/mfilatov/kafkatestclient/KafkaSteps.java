@@ -20,16 +20,18 @@ import ru.mfilatov.kafkatestclient.subscriber.KafkaMessageSubscriber;
 
 @Slf4j
 public class KafkaSteps {
-  @Getter protected final KafkaMessageSubscriber subscriber;
-  @Getter protected final KafkaClientProducer producer;
+  @Getter protected final KafkaMessageSubscriber<String, String> subscriber;
+  @Getter protected final KafkaClientProducer<String, String> producer;
 
-  public KafkaSteps(KafkaMessageSubscriber subscriber, KafkaClientProducer producer) {
+  public KafkaSteps(
+      KafkaMessageSubscriber<String, String> subscriber,
+      KafkaClientProducer<String, String> producer) {
     this.subscriber = subscriber;
     this.producer = producer;
   }
 
   @SneakyThrows
-  private KafkaMessage getMessage(String rqUID) {
+  private KafkaMessage<String, String> getMessage(String rqUID) {
     return subscriber.getMessages().stream()
         .filter(m -> m.headers().get("RqUID").equals(rqUID))
         .findFirst()
@@ -37,7 +39,7 @@ public class KafkaSteps {
   }
 
   @SneakyThrows
-  public KafkaMessage awaitMessage(String rqUID, long timeout) {
+  public KafkaMessage<String, String> awaitMessage(String rqUID, long timeout) {
     await()
         .timeout(timeout, TimeUnit.SECONDS)
         .untilAsserted(() -> assertThat(getMessage(rqUID)).isNotNull());
@@ -50,7 +52,7 @@ public class KafkaSteps {
     }
   }
 
-  public RecordMetadata send(KafkaMessage message) {
+  public RecordMetadata send(KafkaMessage<String, String> message) {
     if (Objects.isNull(producer)) {
       log.error("No producer");
       return null;
@@ -58,7 +60,7 @@ public class KafkaSteps {
     return producer.send(message);
   }
 
-  public List<RecordMetadata> send(List<KafkaMessage> message) {
+  public List<RecordMetadata> send(List<KafkaMessage<String, String>> message) {
     if (Objects.isNull(producer)) {
       log.error("No producer");
       return null;

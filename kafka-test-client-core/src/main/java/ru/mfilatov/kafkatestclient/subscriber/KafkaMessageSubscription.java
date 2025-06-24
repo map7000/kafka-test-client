@@ -22,7 +22,7 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 @Slf4j
 @NoArgsConstructor
 public class KafkaMessageSubscription<K, V> implements Flow.Subscription {
-  private Flow.Subscriber<? super KafkaMessage<K, V>> subscriber;
+  @Getter private Flow.Subscriber<? super KafkaMessage<K, V>> subscriber;
 
   // Method to set the subscriber
   public void setSubscriber(Flow.Subscriber<? super KafkaMessage<K, V>> subscriber) {

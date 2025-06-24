@@ -31,7 +31,11 @@ public class ServiceTest extends AbstractBaseTest {
   @MethodSource("argumentsForTest")
   public void test1Test(Integer i) {
     var rqUID = UUID.randomUUID().toString();
-    kafka.send(KafkaMessage.builder().headers(Map.of("RqUID", rqUID)).value(i.toString()).build());
+    kafka.send(
+        KafkaMessage.<String, String>builder()
+            .headers(Map.of("RqUID", rqUID))
+            .value(i.toString())
+            .build());
     var message = kafka.awaitMessage(rqUID, 60);
     assertThat(Integer.parseInt(message.value())).isEqualTo(i * 2);
   }

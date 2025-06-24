@@ -33,7 +33,7 @@ public class KafkaMessagePublisher<K, V>
   private static final int SHUTDOWN_TIMEOUT_SECONDS = 30;
 
   /** Thread-safe list of active subscriptions */
-  private final List<KafkaMessageSubscription> subscriptions =
+  private final List<KafkaMessageSubscription<K, V>> subscriptions =
       Collections.synchronizedList(new ArrayList<>());
 
   /** Single-threaded executor for managing message consumption */
@@ -84,7 +84,7 @@ public class KafkaMessagePublisher<K, V>
       }
 
       // Create and register new subscription
-      var subscription = new KafkaMessageSubscription(subscriber);
+      var subscription = new KafkaMessageSubscription<K, V>(subscriber);
       subscriber.onSubscribe(subscription);
       subscriptions.add(subscription);
       log.debug("Added new subscriber: {}", subscriber);

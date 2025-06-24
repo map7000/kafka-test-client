@@ -6,12 +6,14 @@ package ru.mfilatov.kafkatestclient;
 
 import java.util.Objects;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 import ru.mfilatov.kafkatestclient.annotations.KafkaReader;
 import ru.mfilatov.kafkatestclient.annotations.KafkaWriter;
 import ru.mfilatov.kafkatestclient.config.KafkaFileConfigProvider;
+import ru.mfilatov.kafkatestclient.processor.StringMessageProcessor;
 import ru.mfilatov.kafkatestclient.producer.KafkaClientProducer;
 import ru.mfilatov.kafkatestclient.subscriber.KafkaMessagePublisher;
 import ru.mfilatov.kafkatestclient.subscriber.KafkaMessageSubscriber;
@@ -19,7 +21,8 @@ import ru.mfilatov.kafkatestclient.subscriber.KafkaMessageSubscriber;
 @Slf4j
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public abstract class AbstractBaseTest {
-  public static final KafkaMessagePublisher publisher = new KafkaMessagePublisher();
+  public static final KafkaMessagePublisher<String, String> publisher =
+      new KafkaMessagePublisher<String, String>(new StringMessageProcessor());
   public KafkaSteps kafka;
 
   @BeforeAll
@@ -27,8 +30,9 @@ public abstract class AbstractBaseTest {
     var topicRead = getKafkaTopicRead();
     var topicWrite = getKafkaTopicWrite();
 
-    KafkaClientProducer producer = Objects.isNull(topicWrite) ? null : createProducer(topicWrite);
-    KafkaMessageSubscriber subscriber =
+    KafkaClientProducer<String, String> producer =
+        Objects.isNull(topicWrite) ? null : createProducer(topicWrite);
+    KafkaMessageSubscriber<String, String> subscriber =
         Objects.isNull(topicRead) ? null : createSubscriber(topicRead);
 
     kafka = new KafkaSteps(subscriber, producer);
@@ -39,7 +43,8 @@ public abstract class AbstractBaseTest {
 
   @AfterAll
   void closeKafka() {
-    kafka.producer.getProducer().close();
+    kafka.producer.close();
+    ;
     kafka.closeSubscriber();
   }
 
@@ -53,12 +58,15 @@ public abstract class AbstractBaseTest {
     return Objects.nonNull(kafkaWriter) ? kafkaWriter.value() : null;
   }
 
-  protected KafkaMessageSubscriber createSubscriber(String topic) {
-    return new KafkaMessageSubscriber(topic);
+  protected KafkaMessageSubscriber<String, String> createSubscriber(String topic) {
+    return new KafkaMessageSubscriber<>(topic);
   }
 
-  protected KafkaClientProducer createProducer(String topic) {
-    return new KafkaClientProducer(
-        new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"), topic);
+  protected KafkaClientProducer<String, String> createProducer(String topic) {
+    return new KafkaClientProducer<String, String>(
+        new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"),
+        topic,
+        new StringSerializer(),
+        new StringSerializer());
   }
 }

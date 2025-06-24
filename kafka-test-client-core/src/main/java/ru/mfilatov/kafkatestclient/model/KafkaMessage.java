@@ -5,7 +5,6 @@
 package ru.mfilatov.kafkatestclient.model;
 
 import java.util.Map;
-import lombok.Builder;
 
 /**
  * Represents a Kafka message with generic key and value types. This record provides an immutable
@@ -14,9 +13,55 @@ import lombok.Builder;
  * @param <K> The type of the message key
  * @param <V> The type of the message value
  */
-@Builder
 public record KafkaMessage<K, V>(
     String topic, Integer partition, Long offset, Map<String, String> headers, K key, V value) {
+
+  public static <K, V> KafkaMessageBuilder<K, V> builder() {
+    return new KafkaMessageBuilder<>();
+  }
+
+  public static class KafkaMessageBuilder<K, V> {
+    private String topic;
+    private Integer partition;
+    private Long offset;
+    private Map<String, String> headers;
+    private K key;
+    private V value;
+
+    public KafkaMessageBuilder<K, V> topic(String topic) {
+      this.topic = topic;
+      return this;
+    }
+
+    public KafkaMessageBuilder<K, V> partition(Integer partition) {
+      this.partition = partition;
+      return this;
+    }
+
+    public KafkaMessageBuilder<K, V> offset(Long offset) {
+      this.offset = offset;
+      return this;
+    }
+
+    public KafkaMessageBuilder<K, V> headers(Map<String, String> headers) {
+      this.headers = headers;
+      return this;
+    }
+
+    public KafkaMessageBuilder<K, V> key(K key) {
+      this.key = key;
+      return this;
+    }
+
+    public KafkaMessageBuilder<K, V> value(V value) {
+      this.value = value;
+      return this;
+    }
+
+    public KafkaMessage<K, V> build() {
+      return new KafkaMessage<>(topic, partition, offset, headers, key, value);
+    }
+  }
 
   /**
    * Creates a new KafkaMessage instance with the specified parameters.
