@@ -22,8 +22,8 @@
         <logback.version>1.5.18</logback.version>
         <junit.version>5.12.2</junit.version>
         <junit-platform.version>1.12.2</junit-platform.version>
-        <assertj.version>3.27.7</assertj.version>
-        <kafka.version>4.0.0</kafka.version>
+        <assertj.version>3.27.3</assertj.version>
+        <kafka.version>4.0.2</kafka.version>
         <awaitility.version>4.3.0</awaitility.version>
         <testcontainers.version>1.21.0</testcontainers.version>
         <junit-pioneer.version>2.3.0</junit-pioneer.version>
