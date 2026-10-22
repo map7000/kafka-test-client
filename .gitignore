@@ -37,3 +37,7 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Allure toolchain cache (allure:report downloads its CLI here) ###
+**/.allure/
+allure-report/
