@@ -1,0 +1,64 @@
+name: Performance tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      probes:
+        description: "Number of correlation probes"
+        default: "200"
+      noise_ops:
+        description: "Gatling junk-traffic ops/sec"
+        default: "100"
+      noise_minutes:
+        description: "Flood duration in minutes"
+        default: "3"
+      p95_ms:
+        description: "Latency budget: p95 (ms)"
+        default: "15000"
+      max_ms:
+        description: "Latency budget: max (ms)"
+        default: "20000"
+
+jobs:
+  performance:
+    runs-on: ubuntu-latest
+    env:
+      PROBES: ${{ github.event.inputs.probes || '200' }}
+      NOISE_OPS: ${{ github.event.inputs.noise_ops || '100' }}
+      NOISE_MINUTES: ${{ github.event.inputs.noise_minutes || '3' }}
+      P95_MS: ${{ github.event.inputs.p95_ms || '15000' }}
+      MAX_MS: ${{ github.event.inputs.max_ms || '20000' }}
+      CONTAINER_CLI: docker
+      ALLURE: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 24
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "24"
+          cache: maven
+
+      - name: Build unit tests (level 1)
+        run: mvn -B test
+
+      - name: Run performance pipeline (levels 3, with Gatling flood)
+        run: bash perf/run_perf_tests.sh
+
+      - name: Collect performance artifacts
+        if: always()
+        run: |
+          mkdir -p perf-artifacts
+          cp -r target/perf-results perf-artifacts/ 2>/dev/null || true
+          cp -r kafka-test-client-core/target/gatling perf-artifacts/ 2>/dev/null || true
+          cp -r kafka-test-client-core/target/allure-results perf-artifacts/ 2>/dev/null || true
+          cp target/perf-noise.log target/perf-service.log target/perf-kafka.log perf-artifacts/ 2>/dev/null || true
+
+      - name: Upload performance artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: perf-artifacts
+          retention-days: 14
