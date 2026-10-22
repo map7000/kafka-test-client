@@ -27,8 +27,10 @@ rebalance.
 ```
 
 - **`KafkaClientProducer`** — thin `KafkaProducer` wrapper; producers are shared per
-  `(cluster, keySerializer, valueSerializer)` key. Sends by `RqUID`; the consumer-side
-  `awaitMessage` correlates replies by the same header.
+  `(cluster, keySerializer, valueSerializer)` key with reference counting, so closing one wrapper
+  never breaks another wrapper still using the same producer. Sends are handed to the producer
+  first and awaited afterwards (allows batching); any send failure throws.
+  The consumer-side `awaitMessage` correlates replies by the `RqUID` header.
 - **`KafkaMessagePublisher`** — a `Flow.Publisher` that owns a single consumer daemon thread.
   Subscribers added via `subscribe()` get a `KafkaMessageSubscription` wired to their topic.
 - **`KafkaMessageConsumer`** — the poll loop. Dynamically adds/removes topic subscriptions as test
@@ -85,9 +87,9 @@ Notes:
   operate on `null` components.
 - Tests run in parallel (`junit.jupiter.execution.parallel.enabled = true`, factor 4) — keep tests
   stateless and isolated; the `RqUID` header is the only correlation mechanism.
-- Under heavy flood, use `FloodAwareBaseTest` + `PerfProbes`: subscribers keep ≤3000 messages and
-  then reset the list, which erases in-flight replies — the flood-aware predicate prevents
-  non-probe traffic from ever reaching the collector.
+- Under heavy flood, use `FloodAwareBaseTest` + `PerfProbes`: subscribers keep ≤3000 messages,
+  dropping the oldest when full (no wholesale reset, so in-flight replies are never erased) and the
+  flood-aware predicate prevents non-probe traffic from ever reaching the collector.
 
 ## Standalone library usage
 

@@ -35,7 +35,10 @@ The core idea: many small JUnit test threads must send and receive **their own**
 
 - Kafka endpoints are declared as class annotations `@KafkaWriter("topic")` / `@KafkaReader("topic")`, and wired up in `AbstractBaseTest` `@BeforeAll` when subclassing from it. New integration tests should subclass `AbstractBaseTest` and use `kafka.send(...)` / `kafka.awaitMessage(rqUID, timeout)`. Forgetting the annotations → producer/subscriber are `null`.
 - Tests run in parallel (`junit.jupiter.execution.parallel.enabled = true`, `parallel-factor = 4`) — keep tests stateless / isolated.
-- Under flood, subscribers must drop non-probe replies: `KafkaMessageSubscriber` keeps ≤3000 messages and then resets its list, which erases in-flight replies. The perf level uses `FloodAwareBaseTest` + `PerfProbes` (RqUID registry + subscriber predicate) for that.
+- Under flood, subscribers drop non-probe replies via the `FloodAwareBaseTest` +
+  `PerfProbes` (RqUID registry + subscriber predicate). `KafkaMessageSubscriber` keeps ≤3000
+  messages, dropping the oldest when full — the storage is bounded, no wholesale list reset that
+  could erase in-flight replies.
 - Surefire injects the AspectJ weaver as `-javaagent` for Allure; keep `aspectj.version` in sync if the Allure setup changes.
 - Message correlation is via `RqUID` header (UUID) sent by the producer and matched by `awaitMessage`.
 - `KafkaMessageConsumer` unsubscribes (leaves the consumer group) when the last subscription is cancelled — keep this behaviour, otherwise cancelled subscribers become zombie group members that stall the next subscription's rebalance for a full session timeout.

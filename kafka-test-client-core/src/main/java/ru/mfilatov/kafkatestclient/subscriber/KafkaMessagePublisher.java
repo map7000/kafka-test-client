@@ -97,8 +97,13 @@ public class KafkaMessagePublisher<K, V>
         throw new NullPointerException("Subscriber cannot be null");
       }
 
-      // Create and register new subscription
-      var subscription = new KafkaMessageSubscription<K, V>(subscriber);
+      // Create and register new subscription. The topic is taken from KafkaMessageSubscriber
+      // instances so the subscription is fully wired in one step.
+      String topic =
+          subscriber instanceof KafkaMessageSubscriber
+              ? ((KafkaMessageSubscriber) subscriber).getKafkaTopic()
+              : null;
+      var subscription = new KafkaMessageSubscription<K, V>(subscriber, topic);
       subscriber.onSubscribe(subscription);
       subscriptions.add(subscription);
       log.debug("Added new subscriber: {}", subscriber);

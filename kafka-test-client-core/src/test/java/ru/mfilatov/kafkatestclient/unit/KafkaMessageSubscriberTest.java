@@ -57,13 +57,38 @@ class KafkaMessageSubscriberTest {
   }
 
   @Test
-  void messageListResetsAfterLimitReached() {
-    // 3001 unique messages: the cap (3000) is hit, the stored list is reset,
-    // and only the message that triggered the reset survives
+  void oldestMessageDroppedWhenLimitReached() {
+    // 3001 unique messages: the cap (3000) is reached and the OLDEST message is dropped,
+    // so the list stays bounded without erasing in-flight replies wholesale
     for (int i = 0; i < 3001; i++) {
       subscriber.onNext(message("v" + i, "uid-" + i));
     }
-    assertThat(subscriber.getMessages().size()).isEqualTo(1);
+    assertThat(subscriber.getMessages()).hasSize(3000);
+    assertThat(subscriber.getMessages().get(0).value()).isEqualTo("v1");
+    assertThat(subscriber.getMessages().get(2999).value()).isEqualTo("v3000");
+  }
+
+  @Test
+  void evictedOldestMessageIsAcceptedAgain() {
+    for (int i = 0; i < 3001; i++) {
+      subscriber.onNext(message("v" + i, "uid-" + i));
+    }
+    // v0 was dropped together with its dedup entry; re-delivering it must store it again
+    // (the newest message tail is kept first, so v0 lands at the end)
+    subscriber.onNext(message("v0", "uid-0"));
+    assertThat(subscriber.getMessages()).hasSize(3000);
+    assertThat(subscriber.getMessages().get(0).value()).isEqualTo("v2");
+    assertThat(subscriber.getMessages().get(2999).value()).isEqualTo("v0");
+  }
+
+  @Test
+  void supportsCustomLimits() {
+    var tiny = new KafkaMessageSubscriber<String, String>("t", 2, 1200000L);
+    tiny.onNext(message("a", "1"));
+    tiny.onNext(message("b", "2"));
+    tiny.onNext(message("c", "3"));
+    assertThat(tiny.getMessages()).hasSize(2);
+    assertThat(tiny.getMessages().get(0).value()).isEqualTo("b");
   }
 
   @Test

@@ -5,11 +5,14 @@
 package ru.mfilatov.kafkatestclient.producer;
 
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
@@ -24,6 +27,12 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
  * A generic Kafka producer that supports different message formats. Manages producer instances per
  * cluster and handles message serialization.
  *
+ * <p>Underlying {@link KafkaProducer} instances are shared between wrappers with the same {@code
+ * (cluster, keySerializer, valueSerializer)} key and protected by reference counting: each wrapper
+ * holds one reference and closing a wrapper releases it. The real producer is only closed when the
+ * last wrapper for the key is closed, so multiple test classes can use the same cluster
+ * concurrently without one close() breaking another.
+ *
  * @param <K> The type of message keys
  * @param <V> The type of message values
  */
@@ -32,12 +41,28 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 public class KafkaClientProducer<K, V> implements AutoCloseable {
   private final String clusterName;
   private final String defaultTopic;
-  private static final Lock lock = new ReentrantLock();
-  private static final ConcurrentMap<String, KafkaProducer<?, ?>> producers =
-      new ConcurrentHashMap<>();
+
+  private static final ConcurrentMap<String, SharedProducer> producers = new ConcurrentHashMap<>();
 
   private final Serializer<K> keySerializer;
   private final Serializer<V> valueSerializer;
+  private final SharedProducer shared;
+
+  /**
+   * A shared KafkaProducer together with the number of wrappers currently referencing it.
+   *
+   * <p>Held as an identity object by each wrapper: ref counts are only ever mutated inside
+   * ConcurrentHashMap compute functions, which are mutually exclusive per key, so the count and the
+   * map entry cannot get out of sync.
+   */
+  private static final class SharedProducer {
+    private final Object producer;
+    private final AtomicInteger refs = new AtomicInteger();
+
+    private SharedProducer(Object producer) {
+      this.producer = producer;
+    }
+  }
 
   /**
    * Creates a new producer with custom serializers.
@@ -57,26 +82,27 @@ public class KafkaClientProducer<K, V> implements AutoCloseable {
     this.keySerializer = keySerializer;
     this.valueSerializer = valueSerializer;
 
-    lock.lock();
-    try {
-      String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
-      if (!producers.containsKey(producerKey)) {
-        producers.put(producerKey, createProducer(config));
-        log.info(
-            "Created producer for cluster: {} with types K: {}, V: {}",
-            clusterName,
-            keySerializer.getClass().getSimpleName(),
-            valueSerializer.getClass().getSimpleName());
-      }
-    } finally {
-      lock.unlock();
-    }
+    String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
+    this.shared =
+        producers.compute(
+            producerKey,
+            (key, existing) -> {
+              SharedProducer candidate =
+                  (existing != null) ? existing : new SharedProducer(createProducer(config));
+              candidate.refs.incrementAndGet();
+              log.info(
+                  "Producer shared for cluster: {} (refs: {}), types K: {}, V: {}",
+                  clusterName,
+                  candidate.refs.get(),
+                  keySerializer.getClass().getSimpleName(),
+                  valueSerializer.getClass().getSimpleName());
+              return candidate;
+            });
   }
 
   @SuppressWarnings("unchecked")
   private KafkaProducer<K, V> getProducer() {
-    String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
-    return (KafkaProducer<K, V>) producers.get(producerKey);
+    return (KafkaProducer<K, V>) shared.producer;
   }
 
   private KafkaProducer<K, V> createProducer(Properties config) {
@@ -91,43 +117,58 @@ public class KafkaClientProducer<K, V> implements AutoCloseable {
   }
 
   /**
-   * Sends multiple messages to Kafka.
+   * Sends multiple messages to Kafka. All messages are handed to the producer first and awaited
+   * afterwards, so the producer can batch them; a failure to send any message throws.
    *
    * @param messages list of messages to send
-   * @return list of record metadata for sent messages
+   * @return list of record metadata for sent messages, aligned with the input order
+   * @throws IllegalStateException if sending any message failed
    */
   public List<RecordMetadata> send(List<KafkaMessage<K, V>> messages) {
-    var metadata = new ArrayList<RecordMetadata>();
+    List<KafkaMessage<K, V>> messagesToSend = messages == null ? List.of() : messages;
     var producer = getProducer();
 
-    for (var message : messages) {
-      var headers = new RecordHeaders();
-      var sourceHeaders = message.headers() == null ? Map.<String, String>of() : message.headers();
-      sourceHeaders.entrySet().stream()
+    var futures = new ArrayList<Future<RecordMetadata>>(messagesToSend.size());
+    for (var message : messagesToSend) {
+      futures.add(producer.send(toProducerRecord(message)));
+    }
+
+    var metadata = new ArrayList<RecordMetadata>(futures.size());
+    try {
+      for (var future : futures) {
+        metadata.add(future.get()); // Wait for send completion
+      }
+    } catch (Exception e) {
+      if (e instanceof InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+      throw new IllegalStateException("Failed to send message(s) to Kafka", e);
+    }
+    return metadata;
+  }
+
+  /**
+   * Builds a {@link ProducerRecord} from a {@link KafkaMessage}, falling back to the default topic
+   * when the message topic is null.
+   */
+  private ProducerRecord<K, V> toProducerRecord(KafkaMessage<K, V> message) {
+    var headers = new RecordHeaders();
+    if (message.headers() != null) {
+      message.headers().entrySet().stream()
+          .filter(entry -> entry.getValue() != null)
           .map(
               entry ->
                   new RecordHeader(
                       entry.getKey(), entry.getValue().getBytes(StandardCharsets.UTF_8)))
           .forEach(headers::add);
-
-      ProducerRecord<K, V> record =
-          new ProducerRecord<>(
-              message.topic() != null ? message.topic() : defaultTopic,
-              message.partition(),
-              message.key(),
-              message.value(),
-              headers);
-
-      try {
-        var future = producer.send(record);
-        metadata.add(future.get()); // Wait for send completion
-      } catch (Exception e) {
-        log.error("Failed to send message: {}", e.getMessage(), e);
-      }
     }
 
-    producer.flush();
-    return metadata;
+    return new ProducerRecord<>(
+        message.topic() != null ? message.topic() : defaultTopic,
+        message.partition(),
+        message.key(),
+        message.value(),
+        headers);
   }
 
   /**
@@ -137,22 +178,32 @@ public class KafkaClientProducer<K, V> implements AutoCloseable {
    * @return record metadata for the sent message
    */
   public RecordMetadata send(KafkaMessage<K, V> message) {
-    var metadata = send(Collections.singletonList(message));
-    return metadata.isEmpty() ? null : metadata.get(0);
+    Objects.requireNonNull(message, "Message cannot be null");
+    var metadata = send(List.of(message));
+    return metadata.get(0);
   }
 
+  /**
+   * Releases this wrapper's reference to the shared producer. The underlying KafkaProducer is
+   * closed only when the last wrapper for the same (cluster, serializers) key is released, so it is
+   * safe for multiple wrappers to coexist.
+   */
   @Override
   public void close() {
-    lock.lock();
-    try {
-      String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
-      KafkaProducer<?, ?> producer = producers.remove(producerKey);
-      if (producer != null) {
-        producer.close();
-        log.info("Closed producer for cluster: {}", clusterName);
-      }
-    } finally {
-      lock.unlock();
-    }
+    String producerKey = getProducerKey(clusterName, keySerializer, valueSerializer);
+    producers.computeIfPresent(
+        producerKey,
+        (key, candidate) -> {
+          if (candidate != shared) {
+            // Our shared producer was fully closed and replaced by a newer one already.
+            return candidate;
+          }
+          if (candidate.refs.decrementAndGet() == 0) {
+            log.info("Last reference released, closing producer for cluster: {}", clusterName);
+            ((KafkaProducer<?, ?>) candidate.producer).close();
+            return null; // Remove the entry from the map
+          }
+          return candidate;
+        });
   }
 }

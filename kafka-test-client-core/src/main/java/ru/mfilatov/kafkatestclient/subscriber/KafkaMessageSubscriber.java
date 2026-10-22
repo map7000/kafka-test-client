@@ -6,7 +6,9 @@ package ru.mfilatov.kafkatestclient.subscriber;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.function.Predicate;
@@ -18,15 +20,19 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 /**
  * A subscriber implementation for consuming Kafka messages using the Reactive Streams pattern. This
  * class maintains a thread-safe list of received messages and supports message filtering through a
- * predicate. It automatically manages message storage limits and subscription lifetime.
+ * predicate. It keeps storage bounded by dropping the oldest message when the limit is reached and
+ * automatically cancels the subscription after a configurable lifetime.
  *
  * <p>Features:
  *
  * <ul>
  *   <li>Thread-safe message storage using {@link CopyOnWriteArrayList}
  *   <li>Configurable message filtering through predicates
- *   <li>Automatic cleanup of old messages when limit is reached
- *   <li>Automatic subscription cancellation after timeout
+ *   <li>Bounded memory: the oldest message is dropped when the limit is reached (no wholesale list
+ *       reset, so in-flight replies observed through {@link #getMessages()} are never erased)
+ *   <li>O(1) duplicate detection via a seen-set of recent messages
+ *   <li>Automatic unbounded-demand request on subscribe (Flow contract) and automatic subscription
+ *       cancellation after timeout
  *   <li>Unique subscriber identification
  * </ul>
  *
@@ -36,11 +42,11 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
  */
 @Slf4j
 public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessage<K, V>> {
-  /** Maximum number of messages to store before resetting the list */
-  private static final int MAX_MESSAGES = 3000;
+  /** Default maximum number of messages to store before dropping the oldest ones */
+  public static final int DEFAULT_MAX_MESSAGES = 3000;
 
-  /** Maximum runtime in milliseconds (20 minutes) before auto-cancellation */
-  private static final long MAX_RUNTIME_MS = 1200000;
+  /** Default maximum runtime in milliseconds (20 minutes) before auto-cancellation */
+  public static final long DEFAULT_MAX_RUNTIME_MS = 1200000L;
 
   /** Unbounded demand requested on subscription (see Flow.Subscription contract) */
   private static final long MAX_DEMAND = Long.MAX_VALUE;
@@ -48,11 +54,20 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
   /** The Kafka topic this subscriber is listening to */
   @Getter private final String kafkaTopic;
 
+  /** Maximum number of messages to store before dropping the oldest ones */
+  private final int maxMessages;
+
+  /** Maximum runtime in milliseconds before auto-cancellation */
+  private final long maxRuntimeMs;
+
   /** Unique identifier for this subscriber instance */
   @Getter private final String id = UUID.randomUUID().toString();
 
-  /** Thread-safe list of received messages */
-  @Getter private volatile List<KafkaMessage<K, V>> messages = new CopyOnWriteArrayList<>();
+  /** Thread-safe ordered list of received messages */
+  @Getter private final List<KafkaMessage<K, V>> messages = new CopyOnWriteArrayList<>();
+
+  /** Messages already stored or filtered, used for O(1) duplicate detection */
+  private final Set<KafkaMessage<K, V>> seen = ConcurrentHashMap.newKeySet();
 
   /** Optional predicate for filtering incoming messages */
   @Setter private Predicate<KafkaMessage<K, V>> predicate;
@@ -64,13 +79,27 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
   private final long startTime = System.currentTimeMillis();
 
   /**
-   * Creates a new subscriber for the specified Kafka topic.
+   * Creates a new subscriber for the specified Kafka topic with default limits.
    *
    * @param kafkaTopic the Kafka topic to subscribe to
    * @throws NullPointerException if kafkaTopic is null
    */
   public KafkaMessageSubscriber(String kafkaTopic) {
+    this(kafkaTopic, DEFAULT_MAX_MESSAGES, DEFAULT_MAX_RUNTIME_MS);
+  }
+
+  /**
+   * Creates a new subscriber with configurable storage and runtime limits.
+   *
+   * @param kafkaTopic the Kafka topic to subscribe to
+   * @param maxMessages maximum number of messages to store
+   * @param maxRuntimeMs maximum runtime before auto-cancellation, in milliseconds
+   * @throws NullPointerException if kafkaTopic is null
+   */
+  public KafkaMessageSubscriber(String kafkaTopic, int maxMessages, long maxRuntimeMs) {
     this.kafkaTopic = Objects.requireNonNull(kafkaTopic, "Kafka topic cannot be null");
+    this.maxMessages = maxMessages;
+    this.maxRuntimeMs = maxRuntimeMs;
   }
 
   /**
@@ -78,7 +107,6 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
    * request will be cancelled.
    *
    * @param subscription the subscription to be established
-   * @throws ClassCastException if subscription is not a KafkaMessageSubscription
    */
   @Override
   public void onSubscribe(Flow.Subscription subscription) {
@@ -91,11 +119,13 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
       KafkaMessageSubscription<K, V> kafkaSubscription =
           (KafkaMessageSubscription<K, V>) subscription;
       this.subscription = kafkaSubscription;
-      this.subscription.setTopic(kafkaTopic);
+      if (kafkaSubscription.getTopic() == null) {
+        kafkaSubscription.setTopic(kafkaTopic);
+      }
       // Honor the Flow contract: unbounded demand up front, since delivery is driven by the
       // consumer loop. Backpressure is applied at the subscription level via hasDemand().
-      this.subscription.request(MAX_DEMAND);
-      log.debug("Subscribed to topic: {} with unbounded demand", kafkaTopic);
+      kafkaSubscription.request(MAX_DEMAND);
+      log.debug("Subscribed to topic: {}", kafkaTopic);
     } else {
       log.error("Subscription is not an instance of KafkaMessageSubscription");
       subscription.cancel();
@@ -104,7 +134,8 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
 
   /**
    * Processes incoming Kafka messages. Messages are filtered based on the predicate if one is set,
-   * and stored in the messages list if accepted.
+   * and stored in the messages list if accepted. The list never exceeds {@link #maxMessages}:
+   * storing another message drops the oldest one.
    *
    * @param message the Kafka message to process
    */
@@ -115,11 +146,6 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
         cancel();
         return;
       }
-
-      if (messages.size() >= MAX_MESSAGES) {
-        resetMessages();
-      }
-
       processMessage(message);
     } catch (Exception e) {
       log.error("Error processing message: {}", message, e);
@@ -157,32 +183,37 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
    * @return true if the subscription has exceeded its maximum runtime
    */
   private boolean shouldCancel() {
-    return System.currentTimeMillis() - startTime > MAX_RUNTIME_MS;
-  }
-
-  /** Resets the message list when the maximum size is reached. */
-  private void resetMessages() {
-    log.warn("Message limit reached ({}), resetting message list", MAX_MESSAGES);
-    messages = new CopyOnWriteArrayList<>();
+    return System.currentTimeMillis() - startTime > maxRuntimeMs;
   }
 
   /**
    * Processes a single Kafka message, applying the predicate filter if one exists. Duplicate
-   * messages are ignored.
+   * messages are ignored via the seen-set; the oldest stored message is dropped first once {@link
+   * #maxMessages} is reached.
    *
    * @param message the message to process
    */
   private void processMessage(KafkaMessage<K, V> message) {
-    if (message == null || messages.contains(message)) {
+    if (message == null || seen.contains(message)) {
       return;
     }
 
-    if (message instanceof KafkaMessage<?, ?>) {
-      KafkaMessage<K, V> typedMessage = (KafkaMessage<K, V>) message;
-      if (predicate == null || predicate.test(typedMessage)) {
-        messages.add(typedMessage);
-        log.debug("Added message: {} for topic: {}", typedMessage.key(), kafkaTopic);
-      }
+    if (predicate != null && !predicate.test(message)) {
+      return;
     }
+
+    while (messages.size() >= maxMessages) {
+      dropOldest();
+    }
+    seen.add(message);
+    messages.add(message);
+    log.debug("Added message: {} for topic: {}", message.key(), kafkaTopic);
+  }
+
+  /** Removes the oldest stored message (and its seen-set entry) to make room for new ones. */
+  private void dropOldest() {
+    KafkaMessage<K, V> oldest = messages.remove(0);
+    seen.remove(oldest);
+    log.debug("Dropped oldest message (limit {} reached) for topic: {}", maxMessages, kafkaTopic);
   }
 }
