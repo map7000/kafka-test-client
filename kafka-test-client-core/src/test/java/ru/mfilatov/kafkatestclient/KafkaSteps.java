@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
@@ -30,15 +29,14 @@ public class KafkaSteps {
     this.producer = producer;
   }
 
-  @SneakyThrows
   private KafkaMessage<String, String> getMessage(String rqUID) {
+    // rqUID first: header values of unrelated flood traffic may not contain RqUID at all
     return subscriber.getMessages().stream()
-        .filter(m -> m.headers().get("RqUID").equals(rqUID))
+        .filter(m -> rqUID.equals(m.headers().get("RqUID")))
         .findFirst()
         .orElse(null);
   }
 
-  @SneakyThrows
   public KafkaMessage<String, String> awaitMessage(String rqUID, long timeout) {
     await()
         .timeout(timeout, TimeUnit.SECONDS)

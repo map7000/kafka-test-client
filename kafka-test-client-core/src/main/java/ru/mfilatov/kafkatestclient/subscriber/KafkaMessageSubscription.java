@@ -8,7 +8,6 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
 
@@ -20,7 +19,6 @@ import ru.mfilatov.kafkatestclient.model.KafkaMessage;
  * @param <V> The type of message values
  */
 @Slf4j
-@NoArgsConstructor
 public class KafkaMessageSubscription<K, V> implements Flow.Subscription {
   @Getter private Flow.Subscriber<? super KafkaMessage<K, V>> subscriber;
 
@@ -48,7 +46,23 @@ public class KafkaMessageSubscription<K, V> implements Flow.Subscription {
    * @throws NullPointerException if subscriber is null
    */
   public KafkaMessageSubscription(Flow.Subscriber<? super KafkaMessage<K, V>> subscriber) {
+    this(subscriber, null);
+  }
+
+  /**
+   * Creates a new subscription for the specified subscriber and topic.
+   *
+   * @param subscriber the subscriber to receive messages
+   * @param topic the topic this subscription listens to, or null to set later via {@link
+   *     #setTopic(String)}
+   * @throws NullPointerException if subscriber is null
+   */
+  public KafkaMessageSubscription(
+      Flow.Subscriber<? super KafkaMessage<K, V>> subscriber, String topic) {
     this.subscriber = java.util.Objects.requireNonNull(subscriber, "Subscriber cannot be null");
+    if (topic != null) {
+      setTopic(topic);
+    }
   }
 
   /**

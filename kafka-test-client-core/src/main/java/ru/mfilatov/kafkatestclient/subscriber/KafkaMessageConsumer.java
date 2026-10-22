@@ -12,7 +12,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.common.header.Header;
 import ru.mfilatov.kafkatestclient.config.KafkaFileConfigProvider;
 import ru.mfilatov.kafkatestclient.consumer.KafkaClientConsumer;
 import ru.mfilatov.kafkatestclient.model.KafkaMessage;
@@ -39,8 +38,8 @@ import ru.mfilatov.kafkatestclient.processor.KafkaMessageProcessor;
  */
 @Slf4j
 public class KafkaMessageConsumer<K, V> implements Runnable {
-  /** Timeout duration for polling Kafka messages in milliseconds */
-  private static final long POLL_TIMEOUT_MS = 250;
+  /** Default timeout duration for polling Kafka messages in milliseconds */
+  private static final long DEFAULT_POLL_TIMEOUT_MS = 250;
 
   /** Sleep duration when no messages are available in milliseconds */
   private static final long EMPTY_POLL_SLEEP_MS = 500;
@@ -56,6 +55,9 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
 
   /** Whether the underlying consumer currently has subscribed topics */
   private boolean subscribed = false;
+
+  /** Timeout duration for polling Kafka messages in milliseconds */
+  private final long pollTimeoutMs;
 
   /** Processor for Kafka messages */
   private final KafkaMessageProcessor<K, V> processor;
@@ -76,7 +78,7 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    */
   public KafkaMessageConsumer(
       List<KafkaMessageSubscription<K, V>> subscriptions, KafkaMessageProcessor<K, V> processor) {
-    this(subscriptions, processor, null);
+    this(subscriptions, processor, null, DEFAULT_POLL_TIMEOUT_MS);
   }
 
   /**
@@ -92,9 +94,31 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
       List<KafkaMessageSubscription<K, V>> subscriptions,
       KafkaMessageProcessor<K, V> processor,
       Properties config) {
+    this(subscriptions, processor, config, DEFAULT_POLL_TIMEOUT_MS);
+  }
+
+  /**
+   * Creates a new Kafka message consumer with the specified subscriptions, processor, explicit
+   * Kafka configuration and poll timeout.
+   *
+   * @param subscriptions list of subscriptions to manage
+   * @param processor message processor instance
+   * @param config explicit Kafka configuration, null to load from {@code kafka.properties}
+   * @param pollTimeoutMs poll timeout in milliseconds for the Kafka consumer
+   * @throws NullPointerException if subscriptions or processor is null
+   */
+  public KafkaMessageConsumer(
+      List<KafkaMessageSubscription<K, V>> subscriptions,
+      KafkaMessageProcessor<K, V> processor,
+      Properties config,
+      long pollTimeoutMs) {
     this.subscriptions = Objects.requireNonNull(subscriptions, "Subscriptions list cannot be null");
     this.processor = Objects.requireNonNull(processor, "Message processor cannot be null");
     this.config = config;
+    if (pollTimeoutMs <= 0) {
+      throw new IllegalArgumentException("Poll timeout must be positive: " + pollTimeoutMs);
+    }
+    this.pollTimeoutMs = pollTimeoutMs;
   }
 
   /**
@@ -191,7 +215,7 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    * @param consumer the Kafka consumer instance
    */
   private void pollAndProcessRecords(Consumer<K, Object> consumer) {
-    ConsumerRecords<K, Object> records = consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MS));
+    ConsumerRecords<K, Object> records = consumer.poll(Duration.ofMillis(pollTimeoutMs));
 
     if (!records.isEmpty()) {
       log.debug("Received {} records", records.count());
@@ -208,8 +232,6 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
   private void processRecords(ConsumerRecords<K, Object> records) {
     for (ConsumerRecord<K, Object> record : records) {
       try {
-        Map<String, String> headers = getHeaders(record);
-        log.debug("Record headers: {}", headers);
         KafkaMessage<K, V> message = processor.processRecord(record);
         notifySubscribers(record.topic(), message);
       } catch (Exception e) {
@@ -252,17 +274,5 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
   /** Initiates a graceful shutdown of the consumer. */
   public void shutdown() {
     isRunning = false;
-  }
-
-  /**
-   * Extracts headers from a Kafka consumer record.
-   *
-   * @param message the consumer record
-   * @return map of header key-value pairs
-   */
-  public Map<String, String> getHeaders(ConsumerRecord<K, Object> message) {
-    return Arrays.stream(message.headers().toArray())
-        .filter(header -> Objects.nonNull(header.value()))
-        .collect(Collectors.toMap(Header::key, header -> new String(header.value())));
   }
 }

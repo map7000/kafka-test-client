@@ -36,6 +36,7 @@ public interface KafkaMessageProcessor<K, V> {
    */
   default Map<String, String> getHeaders(ConsumerRecord<K, Object> message) {
     return Arrays.stream(message.headers().toArray())
+        .filter(header -> header.value() != null)
         .collect(Collectors.toMap(Header::key, header -> new String(header.value())));
   }
 }

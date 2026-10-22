@@ -5,6 +5,7 @@
 package ru.mfilatov.kafkatestclient.unit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 import ru.mfilatov.kafkatestclient.config.KafkaFileConfigProvider;
@@ -21,9 +22,11 @@ class KafkaFileConfigProviderTest {
   }
 
   @Test
-  void missingFileYieldsEmptyConfig() {
-    var config = new KafkaFileConfigProvider().getKafkaConfig("does-not-exist.properties");
-    assertThat(config).isEmpty();
+  void missingFileFailsFast() {
+    assertThatThrownBy(
+            () -> new KafkaFileConfigProvider().getKafkaConfig("does-not-exist.properties"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("does-not-exist.properties");
   }
 
   @Test

@@ -43,8 +43,13 @@ public abstract class AbstractBaseTest {
 
   @AfterAll
   void closeKafka() {
-    kafka.producer.close();
-    ;
+    // Test classes may skip @KafkaWriter and/or @KafkaReader, which leaves producer/subscriber null
+    if (Objects.isNull(kafka)) {
+      return;
+    }
+    if (Objects.nonNull(kafka.getProducer())) {
+      kafka.getProducer().close();
+    }
     kafka.closeSubscriber();
   }
 
