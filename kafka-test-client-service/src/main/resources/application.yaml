@@ -1,0 +1,34 @@
+app:
+  kafka:
+    service:
+      producer:
+        topic: test_topic_out
+      consumer:
+        topic: test_topic_in
+        group-id: your-consumer-group
+        max-poll-records: 500
+        auto-offset-reset: earliest
+        enable-auto-commit: false
+    scheduler:
+      process:
+        interval: 250
+      cleanup:
+        interval: 5000
+
+spring:
+  application:
+    name: kafka-test-client-service
+  kafka:
+    bootstrap-servers: localhost:9092
+    ssl:
+      protocol: PLAINTEXT
+    consumer:
+      group-id: SERVICE_GROUP
+      enable-auto-commit: true
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties.security.protocol: PLAINTEXT
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      properties.security.protocol: PLAINTEXT
