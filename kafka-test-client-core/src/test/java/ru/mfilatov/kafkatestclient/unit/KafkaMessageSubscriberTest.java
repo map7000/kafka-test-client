@@ -75,4 +75,13 @@ class KafkaMessageSubscriberTest {
     assertThat(subscription.isCancelRequested()).isTrue();
     assertThat(subscriber.getMessages()).isEmpty();
   }
+
+  @Test
+  void requestsUnboundedDemandOnSubscribe() {
+    var subscription = new KafkaMessageSubscription<>(subscriber);
+    subscriber.onSubscribe(subscription);
+    // The subscriber must honour the Flow contract by requesting demand up front,
+    // otherwise publishers that honour backpressure would deliver nothing.
+    assertThat(subscription.hasDemand()).isTrue();
+  }
 }

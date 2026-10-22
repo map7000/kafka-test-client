@@ -221,13 +221,19 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
   /**
    * Notifies all subscribers for a specific topic about a new message.
    *
+   * <p>Honors the Flow backpressure contract: a message is only delivered to a subscription that
+   * still has outstanding demand, and the demand counter is decremented for each delivered message.
+   *
    * @param topic the message topic
    * @param message the Kafka message
    */
   private void notifySubscribers(String topic, KafkaMessage<K, V> message) {
-    subscriptions.stream()
-        .filter(s -> s.getTopic().equals(topic))
-        .forEach(s -> s.getSubscriber().onNext(message));
+    for (KafkaMessageSubscription<K, V> subscription : subscriptions) {
+      if (topic.equals(subscription.getTopic()) && subscription.hasDemand()) {
+        subscription.decrementDemand();
+        subscription.getSubscriber().onNext(message);
+      }
+    }
   }
 
   /**

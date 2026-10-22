@@ -42,6 +42,9 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
   /** Maximum runtime in milliseconds (20 minutes) before auto-cancellation */
   private static final long MAX_RUNTIME_MS = 1200000;
 
+  /** Unbounded demand requested on subscription (see Flow.Subscription contract) */
+  private static final long MAX_DEMAND = Long.MAX_VALUE;
+
   /** The Kafka topic this subscriber is listening to */
   @Getter private final String kafkaTopic;
 
@@ -89,7 +92,10 @@ public class KafkaMessageSubscriber<K, V> implements Flow.Subscriber<KafkaMessag
           (KafkaMessageSubscription<K, V>) subscription;
       this.subscription = kafkaSubscription;
       this.subscription.setTopic(kafkaTopic);
-      log.debug("Subscribed to topic: {}", kafkaTopic);
+      // Honor the Flow contract: unbounded demand up front, since delivery is driven by the
+      // consumer loop. Backpressure is applied at the subscription level via hasDemand().
+      this.subscription.request(MAX_DEMAND);
+      log.debug("Subscribed to topic: {} with unbounded demand", kafkaTopic);
     } else {
       log.error("Subscription is not an instance of KafkaMessageSubscription");
       subscription.cancel();
