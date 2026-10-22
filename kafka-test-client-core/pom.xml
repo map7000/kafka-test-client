@@ -14,6 +14,20 @@
     <artifactId>kafka-test-client-lib</artifactId>
     <version>1.0-SNAPSHOT</version>
 
+    <properties>
+        <!-- Test-level routing for surefire (see profiles below): unit | container | perf -->
+        <surefire.includes>**/unit/*Test.java</surefire.includes>
+
+        <!-- Performance test level tuning (override with -D... from scripts/CI) -->
+        <perf.probes>200</perf.probes>
+        <perf.timeout.seconds>60</perf.timeout.seconds>
+        <perf.p95.ms>15000</perf.p95.ms>
+        <perf.max.ms>20000</perf.max.ms>
+        <perf.noise.ops>100</perf.noise.ops>
+        <perf.noise.minutes>3</perf.noise.minutes>
+        <perf.noise.batch>5</perf.noise.batch>
+    </properties>
+
     <dependencies>
         <!-- Lombok -->
         <dependency>
@@ -80,6 +94,34 @@
             <version>${allure.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <!-- Testcontainers (container test level, profile: -Pcontainer) -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Gatling (performance test level noise generator, profile: -Pperf) -->
+        <dependency>
+            <groupId>io.gatling.highcharts</groupId>
+            <artifactId>gatling-charts-highcharts</artifactId>
+            <version>${gatling.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -105,11 +147,21 @@
                     <argLine>
                         -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
                     </argLine>
+                    <includes>
+                        <include>${surefire.includes}</include>
+                    </includes>
                     <properties>
                         <configurationParameters>
                             junit.jupiter.execution.parallel.enabled = true
+                            junit.jupiter.execution.parallel.config.parallel-factor = 4
                         </configurationParameters>
                     </properties>
+                    <systemPropertyVariables>
+                        <perf.probes>${perf.probes}</perf.probes>
+                        <perf.timeout.seconds>${perf.timeout.seconds}</perf.timeout.seconds>
+                        <perf.p95.ms>${perf.p95.ms}</perf.p95.ms>
+                        <perf.max.ms>${perf.max.ms}</perf.max.ms>
+                    </systemPropertyVariables>
                 </configuration>
                 <dependencies>
                     <dependency>
@@ -126,5 +178,42 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Level 2: real Kafka in a container (podman/docker behind Testcontainers) -->
+        <profile>
+            <id>container</id>
+            <properties>
+                <surefire.includes>**/container/*Test.java</surefire.includes>
+            </properties>
+        </profile>
+
+        <!-- Level 3: performance probes + Gatling flood (needs Kafka + service running) -->
+        <profile>
+            <id>perf</id>
+            <properties>
+                <surefire.includes>**/perf/*Test.java</surefire.includes>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>io.gatling</groupId>
+                        <artifactId>gatling-maven-plugin</artifactId>
+                        <version>${gatling-maven-plugin.version}</version>
+                        <configuration>
+                            <simulationClass>ru.mfilatov.kafkatestclient.perf.NoiseSimulation</simulationClass>
+                            <runMultipleSimulations>false</runMultipleSimulations>
+                            <resultsFolder>${project.build.directory}/gatling</resultsFolder>
+                            <extraJvmArgs>
+                                -Dperf.noise.ops=${perf.noise.ops}
+                                -Dperf.noise.minutes=${perf.noise.minutes}
+                                -Dperf.noise.batch=${perf.noise.batch}
+                            </extraJvmArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>
