@@ -23,7 +23,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Dependency Versions -->
-        <lombok.version>1.18.38</lombok.version>
+        <spring-boot.version>4.1.2</spring-boot.version>
+        <lombok.version>1.18.48</lombok.version>
         <logback.version>1.5.18</logback.version>
         <junit.version>5.12.2</junit.version>
         <junit-platform.version>1.12.2</junit-platform.version>
@@ -32,6 +33,9 @@
         <awaitility.version>4.3.0</awaitility.version>
         <allure.version>2.35.5</allure.version>
         <aspectj.version>1.9.26</aspectj.version>
+        <testcontainers.version>2.0.5</testcontainers.version>
+        <gatling.version>3.16.0</gatling.version>
+        <gatling-maven-plugin.version>4.21.12</gatling-maven-plugin.version>
 
         <!-- Plugin Versions -->
         <compiler.version>3.16.0</compiler.version>

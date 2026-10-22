@@ -66,17 +66,18 @@ public record KafkaMessage<K, V>(
   /**
    * Creates a new KafkaMessage instance with the specified parameters.
    *
-   * @param topic the Kafka topic
+   * <p>The topic is optional for producing: {@code KafkaClientProducer} falls back to its default
+   * topic when the message topic is null. Consumed messages always carry their source topic.
+   *
+   * @param topic the Kafka topic, may be null when producing (falls back to the producer's default
+   *     topic)
    * @param partition the partition number
    * @param offset the message offset in the partition
    * @param headers the message headers
    * @param key the message key of type K
    * @param value the message value of type V
-   * @throws NullPointerException if topic is null
    */
-  public KafkaMessage {
-    java.util.Objects.requireNonNull(topic, "Topic cannot be null");
-  }
+  public KafkaMessage {}
 
   /**
    * Creates a copy of this message with a transformed value.

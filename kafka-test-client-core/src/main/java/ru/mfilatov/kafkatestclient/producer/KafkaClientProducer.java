@@ -102,7 +102,8 @@ public class KafkaClientProducer<K, V> implements AutoCloseable {
 
     for (var message : messages) {
       var headers = new RecordHeaders();
-      message.headers().entrySet().stream()
+      var sourceHeaders = message.headers() == null ? Map.<String, String>of() : message.headers();
+      sourceHeaders.entrySet().stream()
           .map(
               entry ->
                   new RecordHeader(

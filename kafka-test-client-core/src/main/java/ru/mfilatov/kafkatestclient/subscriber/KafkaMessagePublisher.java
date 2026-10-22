@@ -7,6 +7,7 @@ package ru.mfilatov.kafkatestclient.subscriber;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -47,11 +48,23 @@ public class KafkaMessagePublisher<K, V>
 
   /**
    * Creates a new KafkaMessagePublisher and starts the message consumer. Initializes a
-   * single-threaded executor with a daemon thread for message processing.
+   * single-threaded executor with a daemon thread for message processing. Kafka configuration is
+   * loaded from the {@code kafka.properties} file on the classpath.
    *
    * @param processor the KafkaMessageProcessor to process messages
    */
   public KafkaMessagePublisher(KafkaMessageProcessor<K, V> processor) {
+    this(processor, null);
+  }
+
+  /**
+   * Creates a new KafkaMessagePublisher and starts the message consumer with explicit Kafka
+   * configuration (useful when the bootstrap servers are dynamic, e.g. Testcontainers).
+   *
+   * @param processor the KafkaMessageProcessor to process messages
+   * @param config explicit Kafka consumer configuration, null to load from {@code kafka.properties}
+   */
+  public KafkaMessagePublisher(KafkaMessageProcessor<K, V> processor, Properties config) {
     // Create a single-threaded executor with a daemon thread
     this.executor =
         Executors.newSingleThreadExecutor(
@@ -61,7 +74,8 @@ public class KafkaMessagePublisher<K, V>
               return thread;
             });
     // Start the message consumer
-    this.consumer = executor.submit(new KafkaMessageConsumer<K, V>(subscriptions, processor));
+    this.consumer =
+        executor.submit(new KafkaMessageConsumer<K, V>(subscriptions, processor, config));
   }
 
   /**

@@ -54,11 +54,21 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
   /** Flag indicating whether the consumer is running */
   private volatile boolean isRunning = true;
 
+  /** Whether the underlying consumer currently has subscribed topics */
+  private boolean subscribed = false;
+
   /** Processor for Kafka messages */
   private final KafkaMessageProcessor<K, V> processor;
 
   /**
-   * Creates a new Kafka message consumer with the specified subscriptions and processor.
+   * Optional explicit Kafka consumer configuration. When null, configuration is loaded from the
+   * {@code kafka.properties} file on the classpath.
+   */
+  private final Properties config;
+
+  /**
+   * Creates a new Kafka message consumer with the specified subscriptions and processor. Kafka
+   * configuration is loaded from the {@code kafka.properties} file on the classpath.
    *
    * @param subscriptions list of subscriptions to manage
    * @param processor message processor instance
@@ -66,8 +76,25 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    */
   public KafkaMessageConsumer(
       List<KafkaMessageSubscription<K, V>> subscriptions, KafkaMessageProcessor<K, V> processor) {
+    this(subscriptions, processor, null);
+  }
+
+  /**
+   * Creates a new Kafka message consumer with the specified subscriptions, processor and explicit
+   * Kafka configuration.
+   *
+   * @param subscriptions list of subscriptions to manage
+   * @param processor message processor instance
+   * @param config explicit Kafka configuration, null to load from {@code kafka.properties}
+   * @throws NullPointerException if subscriptions or processor is null
+   */
+  public KafkaMessageConsumer(
+      List<KafkaMessageSubscription<K, V>> subscriptions,
+      KafkaMessageProcessor<K, V> processor,
+      Properties config) {
     this.subscriptions = Objects.requireNonNull(subscriptions, "Subscriptions list cannot be null");
     this.processor = Objects.requireNonNull(processor, "Message processor cannot be null");
+    this.config = config;
   }
 
   /**
@@ -76,7 +103,7 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    */
   @Override
   public void run() {
-    try (Consumer<K, byte[]> consumer = createConsumer()) {
+    try (Consumer<K, Object> consumer = createConsumer()) {
       while (isRunning && !Thread.currentThread().isInterrupted()) {
         try {
           processSubscriptions(consumer);
@@ -92,11 +119,15 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
   }
 
   /**
-   * Creates a new Kafka consumer using configuration from properties file.
+   * Creates a new Kafka consumer using the explicit configuration when provided, otherwise from the
+   * {@code kafka.properties} file.
    *
    * @return configured Kafka consumer instance
    */
-  private Consumer<K, byte[]> createConsumer() {
+  private Consumer<K, Object> createConsumer() {
+    if (config != null) {
+      return new KafkaClientConsumer<K>(config).getConsumer();
+    }
     return new KafkaClientConsumer<K>(
             new KafkaFileConfigProvider().getKafkaConfig("kafka.properties"))
         .getConsumer();
@@ -107,15 +138,15 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    *
    * @param consumer the Kafka consumer instance
    */
-  private void processSubscriptions(Consumer<K, byte[]> consumer) {
+  private void processSubscriptions(Consumer<K, Object> consumer) {
     cleanupCancelledSubscriptions();
+    updateTopicSubscriptions(consumer);
 
     if (subscriptions.isEmpty()) {
       sleep(EMPTY_POLL_SLEEP_MS);
       return;
     }
 
-    updateTopicSubscriptions(consumer);
     pollAndProcessRecords(consumer);
   }
 
@@ -129,13 +160,27 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    *
    * @param consumer the Kafka consumer instance
    */
-  private void updateTopicSubscriptions(Consumer<K, byte[]> consumer) {
+  private void updateTopicSubscriptions(Consumer<K, Object> consumer) {
     Set<String> currentTopics =
         subscriptions.stream().map(KafkaMessageSubscription::getTopic).collect(Collectors.toSet());
+
+    if (currentTopics.isEmpty()) {
+      if (subscribed) {
+        // Leave the group explicitly: without poll() there are no heartbeats, so the consumer
+        // would remain a "zombie" group member for the whole session timeout and stall the next
+        // subscription's rebalance for that duration.
+        consumer.unsubscribe();
+        subscribed = false;
+        topics = new HashSet<>();
+        log.info("No active subscriptions: consumer unsubscribed and left the group");
+      }
+      return;
+    }
 
     if (!topics.equals(currentTopics)) {
       topics = new HashSet<>(currentTopics);
       consumer.subscribe(topics);
+      subscribed = true;
       log.info("Updated topic subscriptions: {}", topics);
     }
   }
@@ -145,8 +190,8 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    *
    * @param consumer the Kafka consumer instance
    */
-  private void pollAndProcessRecords(Consumer<K, byte[]> consumer) {
-    ConsumerRecords<K, byte[]> records = consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MS));
+  private void pollAndProcessRecords(Consumer<K, Object> consumer) {
+    ConsumerRecords<K, Object> records = consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MS));
 
     if (!records.isEmpty()) {
       log.debug("Received {} records", records.count());
@@ -160,8 +205,8 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    *
    * @param records the records to process
    */
-  private void processRecords(ConsumerRecords<K, byte[]> records) {
-    for (ConsumerRecord<K, byte[]> record : records) {
+  private void processRecords(ConsumerRecords<K, Object> records) {
+    for (ConsumerRecord<K, Object> record : records) {
       try {
         Map<String, String> headers = getHeaders(record);
         log.debug("Record headers: {}", headers);
@@ -209,8 +254,9 @@ public class KafkaMessageConsumer<K, V> implements Runnable {
    * @param message the consumer record
    * @return map of header key-value pairs
    */
-  public Map<String, String> getHeaders(ConsumerRecord<K, byte[]> message) {
+  public Map<String, String> getHeaders(ConsumerRecord<K, Object> message) {
     return Arrays.stream(message.headers().toArray())
+        .filter(header -> Objects.nonNull(header.value()))
         .collect(Collectors.toMap(Header::key, header -> new String(header.value())));
   }
 }
