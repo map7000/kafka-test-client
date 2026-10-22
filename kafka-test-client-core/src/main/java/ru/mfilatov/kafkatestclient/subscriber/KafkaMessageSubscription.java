@@ -84,7 +84,7 @@ public class KafkaMessageSubscription<K, V> implements Flow.Subscription {
     }
 
     if (!isCancelRequested()) {
-      demand.updateAndGet(current -> current + n >= MAX_DEMAND ? MAX_DEMAND : current + n);
+      demand.updateAndGet(current -> current >= MAX_DEMAND - n ? MAX_DEMAND : current + n);
       log.trace("Updated demand to {} for subscriber: {}", demand.get(), subscriber);
     }
   }

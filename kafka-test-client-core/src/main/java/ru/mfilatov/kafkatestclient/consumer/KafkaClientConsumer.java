@@ -7,32 +7,21 @@ package ru.mfilatov.kafkatestclient.consumer;
 import java.util.Properties;
 import lombok.Getter;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.serialization.ByteArrayDeserializer;
-import org.apache.kafka.common.serialization.Deserializer;
 
 /**
- * A generic Kafka consumer wrapper that handles raw byte array messages. Supports configurable key
- * type while maintaining raw byte array values for flexible message processing.
+ * A generic Kafka consumer wrapper that supports configurable key and value deserializers via the
+ * provided configuration. Values are exposed as {@code Object} because the actual runtime type is
+ * determined by the {@code value.deserializer} in the configuration.
  *
  * @param <K> The type of message keys
  */
 @Getter
 public class KafkaClientConsumer<K> {
-  private final KafkaConsumer<K, byte[]> consumer;
-
-  /**
-   * Creates a new Kafka consumer with the specified configuration and key deserializer.
-   *
-   * @param config the Kafka consumer configuration
-   * @param keyDeserializer deserializer for message keys
-   */
-  public KafkaClientConsumer(Properties config, Deserializer<K> keyDeserializer) {
-    this.consumer = new KafkaConsumer<>(config, keyDeserializer, new ByteArrayDeserializer());
-  }
+  private final KafkaConsumer<K, Object> consumer;
 
   /**
    * Creates a new Kafka consumer with the specified configuration. Note: Configuration must include
-   * key.deserializer property.
+   * key.deserializer and value.deserializer properties.
    *
    * @param config the Kafka consumer configuration
    */

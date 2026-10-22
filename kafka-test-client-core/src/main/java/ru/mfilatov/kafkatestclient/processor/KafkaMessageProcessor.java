@@ -26,7 +26,7 @@ public interface KafkaMessageProcessor<K, V> {
    * @return the processed KafkaMessage
    * @throws MessageProcessingException if processing fails
    */
-  KafkaMessage<K, V> processRecord(ConsumerRecord<K, byte[]> record);
+  KafkaMessage<K, V> processRecord(ConsumerRecord<K, Object> record);
 
   /**
    * Extracts headers from a Kafka consumer record.
@@ -34,7 +34,7 @@ public interface KafkaMessageProcessor<K, V> {
    * @param message the consumer record
    * @return map of header key-value pairs
    */
-  default Map<String, String> getHeaders(ConsumerRecord<K, byte[]> message) {
+  default Map<String, String> getHeaders(ConsumerRecord<K, Object> message) {
     return Arrays.stream(message.headers().toArray())
         .collect(Collectors.toMap(Header::key, header -> new String(header.value())));
   }
